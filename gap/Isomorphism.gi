@@ -241,7 +241,7 @@ end);
 
 InstallMethod(RSGraphCanonicalLabelling, "Returns the map that sends RSGraph to its canonical RSGraph.", [IsRSGraph],
 function(graph)
-	local digraph_rec, digraph_canon_vert, digraph_canon_arc, digraph_arcs_mapped, digraph_arcs, PermToMap, new_rev_map, canon_labelling, adj_mat, v_labels_mapped, vert_perm, perm_mat, canon_adj_mat, canon_cert, arc_id_rec, arc_id, idx_x, idx_y, idx, arc_string, moved_arcs, moved_arc_list, moved_rev_points, arc_id_list, lex_arc_id_list, current_arc_id, seen_arcs, current_self_rev_id, current_non_self_id, lex_perm, current_rev, arc_ids;
+	local digraph_rec, digraph_canon_vert, digraph_canon_arc, digraph_arcs_mapped, digraph_arcs, PermToMap, new_rev_map, adj_mat, v_labels_mapped, vert_perm, perm_mat, canon_adj_mat, canon_cert, arc_id_rec, arc_id, idx_x, idx_y, idx, arc_string, moved_arcs, moved_rev_points, arc_id_list, lex_arc_id_list, current_arc_id, seen_arcs, current_self_rev_id, current_non_self_id, lex_perm, current_rev, arc_ids, number_vertices;
 
 	PermToMap := function(perm, domain)
 		local dp_elms;
@@ -267,7 +267,6 @@ function(graph)
 	# Have the reverse map work on the new arc mapping. 
 	new_rev_map := Inverse(digraph_canon_arc)*digraph_rec.reverse_map*digraph_canon_arc;
 
-
 	# Make the mappings from the RSGraph to the "standard range" [1..N]. 
 	digraph_canon_vert := digraph_rec.vertex_id_map*PermToMap(digraph_canon_vert, Range(digraph_rec.vertex_id_map));
 	digraph_canon_arc := digraph_rec.arc_id_map*PermToMap(digraph_canon_arc, Range(digraph_rec.arc_id_map));
@@ -277,20 +276,18 @@ function(graph)
 		digraph_canon_arc := MappingPermListList(List(Source(digraph_canon_arc)), List(Source(digraph_canon_arc), x -> x^digraph_canon_arc));
 	fi;
 
-	canon_labelling := [digraph_canon_vert, digraph_canon_arc, new_rev_map];
-
-
 	# Calculate the canonical certificate. 
 	adj_mat := RSGraphAdjacencyMatrix(graph);
+	number_vertices := Size(adj_mat);
 
-	if not IsPerm(canon_labelling[1]) then
-		v_labels_mapped := List(RSGraphVertices(graph), x -> x^canon_labelling[1]);
+	if not IsPerm(digraph_canon_vert) then
+		v_labels_mapped := List(RSGraphVertices(graph), x -> x^digraph_canon_vert);
 		vert_perm := SortingPerm(v_labels_mapped);
 	else
-		vert_perm := canon_labelling[1];
+		vert_perm := digraph_canon_vert;
 	fi;
 
-	perm_mat := PermutationMat(vert_perm, Size(adj_mat), 1);
+	perm_mat := PermutationMat(vert_perm, number_vertices, 1);
 	canon_adj_mat := Inverse(perm_mat)*adj_mat*perm_mat;
 
 	canon_cert := String(canon_adj_mat);
@@ -298,9 +295,15 @@ function(graph)
 	arc_id_rec := rec();
 
 	arc_id := 0;
+	
+	# vert_pairs := list of (idx_x, idx_y)
+	# arcs_between_verts := list of ((x,y), arc_ids)
+	# for pair in vert_pairs get arc_ids
+	# if Size(arc_ids) > 0
+	#	arcs_between_verts.add((x,y), arc_ids)
 
-	for idx_x in [1..Size(canon_adj_mat)] do
-		for idx_y in [1..Size(canon_adj_mat)] do
+	for idx_x in [1..number_vertices] do
+		for idx_y in [1..number_vertices] do
 			arc_string := StringFormatted("{1},{2}", idx_x, idx_y);
 
 			# Get the arc ids for arc from idx_x to idx_y. 
@@ -309,16 +312,7 @@ function(graph)
 		od;
 	od;
 
-	moved_arc_list := List([1..Size(adj_mat)], x -> 0);
-	moved_rev_points := MovedPoints(canon_labelling[3]);
-
-	# For each vertex find the number of non-self-reverse loops.  
-	for idx in [1..Size(adj_mat)] do
-		arc_string := StringFormatted("{1},{2}", idx, idx);
-		moved_arcs := Intersection(moved_rev_points, arc_id_rec.(arc_string));
-		moved_arc_list[idx] := moved_arcs;
-		canon_cert := Concatenation(canon_cert, StringFormatted("{1};", Size(moved_arcs)));
-	od;
+	moved_rev_points := MovedPoints(new_rev_map);
 
 	# Calculate the "lexicographically standard" arc map. 
 	arc_id_list := [1..RSGraphNumberArcs(graph)];
@@ -326,63 +320,61 @@ function(graph)
 
 	current_arc_id := 1;
 	seen_arcs := [];
-	for idx_x in [1..Size(canon_adj_mat)] do
-		for idx_y in [1..Size(canon_adj_mat)] do
+	for idx_x in [1..number_vertices] do
+		for idx_y in [1..number_vertices] do
 			arc_string := StringFormatted("{1},{2}", idx_x, idx_y);
 			arc_ids := arc_id_rec.(arc_string);
-			# If there are arcs between the two vertices. 
-			if Size(arc_id_rec.(arc_string)) > 0 then 
-				if idx_x = idx_y then
-					# If it's a loop. 
-					moved_arcs := moved_arc_list[idx_x];
-					current_self_rev_id := current_arc_id+Size(moved_arcs);
-					current_non_self_id := current_arc_id;
-
-					for arc_id in arc_ids do
-						if arc_id in moved_arcs and not arc_id in seen_arcs then
-							# If it's not self reverse then make it and its reverse
-							# the next at the "start" of the loop arc ids. Add both
-							# to the seen arcs list to stop this from happening when
-							# the reverse is reached. 
-							lex_arc_id_list[current_non_self_id] := arc_id;
-							lex_arc_id_list[current_non_self_id+1] := arc_id^canon_labelling[3];
-							current_non_self_id := current_non_self_id + 2;
-							Add(seen_arcs, arc_id);
-							Add(seen_arcs, arc_id^canon_labelling[3]);
-							current_arc_id := current_arc_id + 1;
-						elif not arc_id in seen_arcs then
-							# Otherwise add it to the "middle to end" of the loop. 
-							lex_arc_id_list[current_self_rev_id] := arc_id;
-							current_self_rev_id := current_self_rev_id + 1;
-							Add(seen_arcs, arc_id);
-							current_arc_id := current_arc_id + 1;
-						else
-							current_arc_id := current_arc_id + 1;
-						fi;
-					od;
-
-				else
-					current_rev := Minimum(arc_id_rec.(Reversed(arc_string)));
-					for arc_id in arc_ids do
-						if not arc_id in seen_arcs then
-							lex_arc_id_list[current_arc_id] := arc_id;
-							lex_arc_id_list[current_rev] := arc_id^canon_labelling[3];
-							Add(seen_arcs, arc_id);
-							Add(seen_arcs, arc_id^canon_labelling[3]);
-						fi;
-						current_rev := current_rev + 1;
-						current_arc_id := current_arc_id+1;
-					od;
-				fi;
+			
+			# If there are not arcs between the two vertices. 
+			if Size(arc_ids) = 0 then
+				continue;
 			fi;
+
+			# If it's a loop, find the number of non-self-reverse loops.
+			if idx_x = idx_y then
+				moved_arcs := Intersection(moved_rev_points, arc_id_rec.(arc_string));
+				current_self_rev_id := current_arc_id+Size(moved_arcs);
+				current_non_self_id := current_arc_id;
+				canon_cert := Concatenation(canon_cert, StringFormatted("{1};", Size(moved_arcs)));
+			else
+				current_rev := Minimum(arc_id_rec.(Reversed(arc_string)));
+			fi;
+			
+			for arc_id in arc_ids do
+				if arc_id in seen_arcs then
+					if idx_x <> idx_y then
+						current_rev := current_rev + 1;
+					fi;
+				elif idx_x <> idx_y then # Not loops.
+					lex_arc_id_list[current_arc_id] := arc_id;
+					lex_arc_id_list[current_rev] := arc_id^new_rev_map;
+					Add(seen_arcs, arc_id);
+					Add(seen_arcs, arc_id^new_rev_map);
+				elif arc_id in moved_arcs
+					# If it's not self reverse then make it and its reverse
+					# the next at the "start" of the loop arc ids. Add both
+					# to the seen arcs list to stop this from happening when
+					# the reverse is reached. 
+					lex_arc_id_list[current_non_self_id] := arc_id;
+					lex_arc_id_list[current_non_self_id+1] := arc_id^new_rev_map;
+					current_non_self_id := current_non_self_id + 2;
+					Add(seen_arcs, arc_id);
+					Add(seen_arcs, arc_id^new_rev_map);
+				else
+					# Otherwise add it to the "middle to end" of the loop. 
+					lex_arc_id_list[current_self_rev_id] := arc_id;
+					current_self_rev_id := current_self_rev_id + 1;
+					Add(seen_arcs, arc_id);
+				fi;
+				
+				current_arc_id := current_arc_id + 1;
+			od;
 		od;
 	od;
 
 	lex_perm := MappingPermListList(lex_arc_id_list, arc_id_list);
 
-	canon_labelling := Concatenation(canon_labelling, [lex_perm, canon_cert]);
-
-	return canon_labelling;
+	return [digraph_canon_vert, digraph_canon_arc, new_rev_map, lex_perm, canon_cert];
 end);
 
 InstallMethod(RSGraphCanonicalCertificate, "two graphs have the same certificate if and only if they are isomorphic", [IsRSGraph],
